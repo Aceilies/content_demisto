@@ -3,6 +3,7 @@ from CommonServerPython import * # noqa: F401
 from collections.abc import Callable
 
 import uuid
+import base64
 import re
 from urllib.parse import unquote
 
