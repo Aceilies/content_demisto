@@ -3,8 +3,8 @@ from CommonServerPython import * # noqa: F401
 from collections.abc import Callable
 
 import uuid
-import base64
-
+import re
+from urllib.parse import unquote
 
 JWT_TOKEN_EXPIRATION_PERIOD = 30
 DEFAULT_FETCH = 50
@@ -822,6 +822,23 @@ def format_timestamp(timestamp: str, output_format: str = DATETIME_FORMAT) -> st
         datetime_res = arg_to_datetime(timestamp)
     return datetime_res.strftime(output_format)  # type: ignore
 
+def extract_filename(content_disposition: str) -> str:
+    if not content_disposition:
+        return "attachment"
+    # RFC 5987 format: filename*=UTF-8''file.txt
+    match = re.search(r'filename\*\s*=\s*[^\'"]+\'\'([^;]+)', content_disposition)
+    if match:
+        return unquote(match.group(1))
+    # Quoted filename: filename="file.txt"
+    match = re.search(r'filename\s*=\s*"([^"]+)"', content_disposition)
+    if match:
+        return match.group(1)
+    # Unquoted filename: filename=file.txt
+    match = re.search(r'filename\s*=\s*([^;]+)', content_disposition)
+    if match:
+        return match.group(1).strip()
+
+    return "attachment"
 
 def format_number_list_argument(number_list_string: str) -> List[int]:
     """
@@ -1223,33 +1240,28 @@ def spam_quarantine_message_delete_command(
 
 def spam_quarantine_attachment_download_command(
     client: Client, args: Dict[str, Any]
-) -> List[CommandResults]:
+) -> Dict[str, Any]:
     """
     Download attachment for quarantined message in pvo.
-
-    Args:
-        client (Client): Cisco SMA API client.
-        args (Dict[str, Any]): Command arguments from XSOAR.
-
-    Returns:
-        List[CommandResults]: readable outputs for XSOAR.
     """
     quarantine_type = "pvo"
     attachment_id = args.get("attachment_id")
     message_id = args.get("message_id")
 
-
     response = client.spam_quarantine_attachment_download_request(
-        quarantine_type=quarantine_type, attachment_id=attachment_id, message_id=message_id
+        quarantine_type=quarantine_type,
+        attachment_id=attachment_id,
+        message_id=message_id,
     )
 
+    # Convert binary → base64
+    base64_string = base64.b64encode(response.content).decode("utf-8")
 
-    base64_string = response.content
-
-    filename = str(response.headers.get('Content-Disposition').split('"')[1])
+    # Safe filename extraction
+    content_disposition = response.headers.get("Content-Disposition", "")
+    filename = extract_filename(content_disposition)
 
     return fileResult(filename, base64_string)
-
 
 
 def spam_quarantine_message_send_copy_command(
